@@ -37,7 +37,6 @@
 (defvar find-git-include-patterns-list ())
 (defvar find-git-include-pathes-list ())
 
-
 ;;; internal variables
 (defconst find-git-buffers-alist ())
 
@@ -114,6 +113,7 @@
     (define-key km (kbd "<down>") 'find-git-mode-next-line)
     (define-key km (kbd "j")      'find-git-mode-next-line)
     (define-key km (kbd "d")      'find-git-mode-dired)
+    (define-key km (kbd "s")      'find-git-mode-git-status)
     (define-key km (kbd "q")       'bury-buffer)
     km))
 
@@ -157,22 +157,24 @@
           dir)))))
 
 (defun find-git-mode--after-moved ()
-
   (when (and find-git-current-line
              (> find-git-current-line 1))
     (find-git--add-text-propeties-to-line
      find-git-current-line
      '(face find-git-repos-face)))
-
   (setq find-git-current-line (line-number-at-pos (point)))
-
   (let ((repo (find-git-mode--repos-at-point (point))))
-
     (when repo
-
       (find-git--add-text-propeties-to-line
        (line-number-at-pos (point)) '(face find-git-current-repos-face))
+      (setq find-git-current-repos repo))))
+  
 
+;;; find-git-mode-commands
+(defun find-git-mode-git-status ()
+  (interactive)
+  (let ((repo (find-git-mode--repos-at-point (point))))
+    (when repo
       (let* ((slot (assoc repo find-git-buffers-alist))
              (buf  (if (and slot
                             (buffer-live-p (cdr slot)))
@@ -186,15 +188,13 @@
                            (setq find-git-buffers-alist
                                  (cons
                                   (cons repo buf)
-                                  find-git-buffers-alist))
+                              find-git-buffers-alist))
                            buf)))))
-             (win (selected-window)))
+         (win (selected-window)))
         (pop-to-buffer buf)
-        (select-window win))))
-  )
-  
+        (select-window win)))))
 
-;;; find-git-mode-commands
+
 (defun find-git-mode-previous-line (&optional n)
   (interactive)
   (previous-line n)
@@ -249,9 +249,8 @@
       (delete-region (point-min) (point-max))
       (goto-char (point-min))
       (insert (format "git repositories under the %s.\n" base))
-      (add-text-properties (point-min)
-                           (point)
-                           '(face find-git-title-face))
+      (find-git--add-text-propeties-to-line
+       1 '(face find-git-title-face))
       (find-git-mode)
       (setq find-git-base-directory (expand-file-name base)))
 
