@@ -1,0 +1,71 @@
+特定のディレクトリ以下にある git リポジトリを検索し、
+ブラウズできるようにします。
+
+
+インストール
+------------
+テキトーに、load-path の通ったところに、find-git.el をおいてください。
+
+
+設定
+---
+
+(require 'find-git)
+;; git-status に用いる関数 (magit-status 以外試してないの。ごめんね)
+
+(setq find-git-git-status-function 'magit-status)
+(setq
+    ;; 検索を除外するディレクトリ名のパターン
+    find-git-exclude-patterns-list
+    '(
+      "~/\.\.*"
+      "/rc/site-lisp\\."
+      )
+
+    ;; 検索を除外するディレクトリ名
+    find-git-exclude-pathes-list
+    '(
+      "~/smb"
+      "~/sandbox"
+      "~/Desktop"
+      "~/work/build"
+      "~/work/pending"
+      "~/work/codereading"
+      "~/share/emacs"
+      "~/local"
+      )
+
+    ;; 検索を除外しないディレクトリ名のパターンのリスト
+    find-git-include-petterns-list
+    '()
+
+    ;; 検索を除外しないディレクトリ名のリスト
+    find-git-include-pathes-list
+    '(
+      "~/.emacs.d"
+      )
+
+    ;; 入れ子になっているリポジトリ名のリスト
+    find-git-nested-tree-list
+    '(
+      "~"
+      )
+    
+    )
+
+
+使う
+----
+
+M-x find-git とすると、検索のルートに使うディレクトリを聴いてくるので、
+テキトーに入力する。そーすると、そこを起点に、.git のあるディレクトリの
+一覧を生成して、ポップアップするので、あとはそのバッファで様子を見たい
+リポジトリに移動して
+
+s ... git-status する
+d ... dired する
+
+ほか、
+
+q ... burry-buffer
+
