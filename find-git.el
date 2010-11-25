@@ -44,24 +44,27 @@
    (append
     patterns-list
     (mapcar (lambda (x)
-              (format "\\`%s\\'"(regexp-quote
-                                 (expand-file-name x))))
+              (format "\\`%s/?\\'"(regexp-quote
+                                   (expand-file-name x))))
             pathes-list)
     )
-   "\\|"))
+   "\\|")
+)
 
 (defun find-git--include-pattern ()
   (or (and (or find-git-include-patterns-list
                find-git-include-pathes-list)
            (find-git--make-pattern find-git-include-patterns-list
                                    find-git-include-pathes-list))
-      "\\`\0\\'"))
+      "\\`\0\\'")
+  )
 
 
 (defun find-git--exclude-pattern ()
   (find-git--make-pattern (append (list "/\\.git\\'")
                                   find-git-exclude-patterns-list)
-                          find-git-exclude-pathes-list))
+                          find-git-exclude-pathes-list)
+  )
 
 (defun find-git--nested-tree-pattern ()
   (find-git--make-pattern ()
@@ -81,35 +84,41 @@
 (defconst find-git-buffers-alist ())
 (defconst find-git-mode-repos-mark "    ")
 
-(defun find-git-mode--after-moved ()
-  (let ((ln (line-number-at-pos (point))))
+(defun find-git-mode--repos-at-point (point)
+  (let ((ln (line-number-at-pos point)))
     (when (> ln 1)
-      (let ((repo (save-excursion
-                    (beginning-of-line)
-                    (re-search-forward
-                     (regexp-quote find-git-mode-repos-mark) nil t)
-                    (buffer-substring-no-properties
-                     (point) (progn (end-of-line) (point))))))
+      (let ((dir (save-excursion
+                   (goto-char point)
+                   (beginning-of-line)
+                   (re-search-forward
+                    (regexp-quote find-git-mode-repos-mark) nil t)
+                   (buffer-substring-no-properties
+                    (point) (progn (end-of-line) (point))))))
+        (when (and (> (length dir) 0)
+                   (file-directory-p dir))
+          dir)))))
 
-        (when (file-directory-p repo)
-          (let* ((slot (assoc repo find-git-buffers-alist))
-                 (buf  (if (and slot
-                                (buffer-live-p (cdr slot)))
-                           (cdr slot)
-                         (progn
-                           (save-window-excursion
-                             (apply
-                              find-git-status-function
-                              (list (concat repo "/")))
-                             (let ((buf (current-buffer)))
-                               (setq find-git-buffers-alist
-                                     (cons
-                                      (cons repo buf)
-                                      find-git-buffers-alist))
-                               buf))))))
-            (let ((win (selected-window)))
-              (pop-to-buffer buf)
-              (select-window win))))))))
+(defun find-git-mode--after-moved ()
+  (let ((repo (find-git-mode--repos-at-point (point))))
+    (when repo
+      (let* ((slot (assoc repo find-git-buffers-alist))
+             (buf  (if (and slot
+                            (buffer-live-p (cdr slot)))
+                       (cdr slot)
+                     (progn
+                       (save-window-excursion
+                         (apply
+                          find-git-status-function
+                          (list (concat repo "/")))
+                         (let ((buf (current-buffer)))
+                           (setq find-git-buffers-alist
+                                 (cons
+                                  (cons repo buf)
+                                  find-git-buffers-alist))
+                           buf))))))
+        (let ((win (selected-window)))
+          (pop-to-buffer buf)
+          (select-window win))))))
   
 (defun find-git-mode-previous-line (&optional n)
   (interactive)
@@ -121,12 +130,25 @@
   (next-line n)
   (find-git-mode--after-moved))
 
+(defun find-git-mode-dired ()
+  (interactive)
+  (let ((repo (find-git-mode--repos-at-point (point))))
+    (when repo
+      (let ((win (selected-window))
+            (buf (save-window-excursion
+                   (dired repo)
+                   (current-buffer))))
+        (pop-to-buffer buf)
+        (select-window win)))))
+
+
 (defconst find-git-mode-map
   (let ((km (make-sparse-keymap)))
     (define-key km (kbd "<up>")   'find-git-mode-previous-line)
     (define-key km (kbd "k")      'find-git-mode-previous-line)
     (define-key km (kbd "<down>") 'find-git-mode-next-line)
     (define-key km (kbd "j")      'find-git-mode-next-line)
+    (define-key km (kbd "d")      'find-git-mode-dired)
     km))
 
 (define-derived-mode find-git-mode text-mode "find-git")
@@ -135,7 +157,6 @@
 
 (defun find-git (base)
   (interactive (list (read-directory-name "base: ")))
-  (setq find-git-buffers-alist ())
   (let ((xpat (find-git--exclude-pattern))
         (ipat (find-git--include-pattern))
         (npat (find-git--nested-tree-pattern))
@@ -153,6 +174,7 @@
     (when buf
       (pop-to-buffer buf)
       (set-buffer    buf)
+      (setq buffer-read-only nil)
       (delete-region (point-min) (point-max))
       (goto-char (point-min))
       (insert (format "git repositories under the %s.\n" base))
@@ -170,6 +192,11 @@
               (apply echo (list path))
               (setq R (cons path R))
               (unless (string-match npat path) :stop)))))
+
+    (when buf
+      (setq buffer-read-only t)
+      (goto-char (point-min)))
+
     (reverse R)))
 
 
