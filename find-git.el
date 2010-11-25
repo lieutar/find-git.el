@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2010  
 
-;; Author:  <lieutar@TREEFROG>
+;; Author:  <lieutar@1dk.jp>
 ;; Keywords: 
 
 ;; This file is free software; you can redistribute it and/or modify
@@ -27,6 +27,8 @@
 ;;; Code:
 (require 'cl)
 
+
+;;; basic options
 (defvar find-git-status-function 'magit-status)
 (defvar find-git-nested-tree-list ())
 (defvar find-git-exclude-pathes-list ())
@@ -35,8 +37,16 @@
 (defvar find-git-include-patterns-list ())
 (defvar find-git-include-pathes-list ())
 
-(defvar find-git--visited-dir ())
 
+;;; internal variables
+(defconst find-git-buffers-alist ())
+
+
+
+
+
+
+;;; utilities
 (defun find-git--make-pattern (patterns-list
                                pathes-list)
   (mapconcat
@@ -80,9 +90,57 @@
                    (file-readable-p full))
           (find-git--walk-dir full cb))))))
 
+(defun find-git--add-text-propeties-to-line (line props)
+  (let (buffer-read-only)
+    (save-excursion
+      (goto-line line)
+      (beginning-of-line)
+      (add-text-properties (point) (progn (condition-case nil
+                                              (next-line)
+                                            (error (end-of-line)))  (point))
+                           props))))
 
-(defconst find-git-buffers-alist ())
+
+;;;
+;;; find-git-mode
+;;;
+
+
 (defconst find-git-mode-repos-mark "    ")
+(defconst find-git-mode-map
+  (let ((km (make-sparse-keymap)))
+    (define-key km (kbd "<up>")   'find-git-mode-previous-line)
+    (define-key km (kbd "k")      'find-git-mode-previous-line)
+    (define-key km (kbd "<down>") 'find-git-mode-next-line)
+    (define-key km (kbd "j")      'find-git-mode-next-line)
+    (define-key km (kbd "d")      'find-git-mode-dired)
+    (define-key km (kbd "q")       'bury-buffer)
+    km))
+
+;;; buffer local variables
+(defvar find-git-base-directory nil)
+(defvar find-git-current-line   nil)
+(defvar find-git-current-repos  nil)
+
+;;; faces
+(dolist (spec
+         '((find-git-title-face
+            :weight      ultra-bold
+            :background  unspecified
+            :foreground  unspecified
+            :underline   t)
+           (find-git-repos-face)
+           (find-git-current-repos-face
+            :background "#CFC")
+           ))
+  (let* ((face  (car spec))
+         (props (cdr spec)))
+    (make-face face)
+    (while props
+      (let ((prop (car props))
+            (val  (cadr props)))
+        (setq props (cddr props))
+        (set-face-attribute face nil prop val)))))
 
 (defun find-git-mode--repos-at-point (point)
   (let ((ln (line-number-at-pos point)))
@@ -99,8 +157,22 @@
           dir)))))
 
 (defun find-git-mode--after-moved ()
+
+  (when (and find-git-current-line
+             (> find-git-current-line 1))
+    (find-git--add-text-propeties-to-line
+     find-git-current-line
+     '(face find-git-repos-face)))
+
+  (setq find-git-current-line (line-number-at-pos (point)))
+
   (let ((repo (find-git-mode--repos-at-point (point))))
+
     (when repo
+
+      (find-git--add-text-propeties-to-line
+       (line-number-at-pos (point)) '(face find-git-current-repos-face))
+
       (let* ((slot (assoc repo find-git-buffers-alist))
              (buf  (if (and slot
                             (buffer-live-p (cdr slot)))
@@ -115,11 +187,14 @@
                                  (cons
                                   (cons repo buf)
                                   find-git-buffers-alist))
-                           buf))))))
-        (let ((win (selected-window)))
-          (pop-to-buffer buf)
-          (select-window win))))))
+                           buf)))))
+             (win (selected-window)))
+        (pop-to-buffer buf)
+        (select-window win))))
+  )
   
+
+;;; find-git-mode-commands
 (defun find-git-mode-previous-line (&optional n)
   (interactive)
   (previous-line n)
@@ -142,19 +217,15 @@
         (select-window win)))))
 
 
-(defconst find-git-mode-map
-  (let ((km (make-sparse-keymap)))
-    (define-key km (kbd "<up>")   'find-git-mode-previous-line)
-    (define-key km (kbd "k")      'find-git-mode-previous-line)
-    (define-key km (kbd "<down>") 'find-git-mode-next-line)
-    (define-key km (kbd "j")      'find-git-mode-next-line)
-    (define-key km (kbd "d")      'find-git-mode-dired)
-    km))
-
-(define-derived-mode find-git-mode text-mode "find-git")
+(define-derived-mode find-git-mode text-mode "find-git"
+  (mapcar
+   'make-variable-buffer-local
+   '(find-git-base-directory
+     find-git-current-line
+     find-git-current-repos)))
 
 
-
+;;; commands
 (defun find-git (base)
   (interactive (list (read-directory-name "base: ")))
   (let ((xpat (find-git--exclude-pattern))
@@ -178,7 +249,11 @@
       (delete-region (point-min) (point-max))
       (goto-char (point-min))
       (insert (format "git repositories under the %s.\n" base))
-      (find-git-mode))
+      (add-text-properties (point-min)
+                           (point)
+                           '(face find-git-title-face))
+      (find-git-mode)
+      (setq find-git-base-directory (expand-file-name base)))
 
     (find-git--walk-dir
      (expand-file-name base)
