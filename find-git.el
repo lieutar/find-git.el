@@ -105,7 +105,6 @@
 ;;;
 
 
-(defconst find-git-mode-repos-mark "    ")
 (defconst find-git-mode-map
   (let ((km (make-sparse-keymap)))
     (define-key km (kbd "<up>")   'find-git-mode-previous-line)
@@ -114,7 +113,8 @@
     (define-key km (kbd "j")      'find-git-mode-next-line)
     (define-key km (kbd "d")      'find-git-mode-dired)
     (define-key km (kbd "s")      'find-git-mode-git-status)
-    (define-key km (kbd "q")       'bury-buffer)
+    (define-key km (kbd "<RET>")  'find-git-mode-git-status)
+    (define-key km (kbd "q")      'bury-buffer)
     km))
 
 ;;; buffer local variables
@@ -126,10 +126,13 @@
 (dolist (spec
          '((find-git-title-face
             :weight      ultra-bold
-            :background  unspecified
+            :background  "#FC3"
             :foreground  unspecified
             :underline   t)
-           (find-git-repos-face)
+           (find-git-repos-face
+            :foreground  "#00F")
+           (find-git-repos-has-status-buffer-face
+            :foreground  "#F00")
            (find-git-current-repos-face
             :background "#CFC")
            ))
@@ -148,8 +151,6 @@
       (let ((dir (save-excursion
                    (goto-char point)
                    (beginning-of-line)
-                   (re-search-forward
-                    (regexp-quote find-git-mode-repos-mark) nil t)
                    (buffer-substring-no-properties
                     (point) (progn (end-of-line) (point))))))
         (when (and (> (length dir) 0)
@@ -233,7 +234,15 @@
         (npat (find-git--nested-tree-pattern))
         (echo (if (interactive-p)
                   (lambda (path)
-                    (insert (format "%s%s\n" find-git-mode-repos-mark path))
+                    (insert (format "%s\n"  path))
+                    (previous-line)
+                    (find-git--add-text-propeties-to-line
+                     (line-number-at-pos (point))
+                     `(
+                       find-git-repos ,path
+                       face           find-git-repos-face
+                       ))
+                    (next-line)
                     )
                 (lambda (x))))
         (buf  (when (interactive-p)
