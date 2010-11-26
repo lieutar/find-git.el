@@ -18,7 +18,7 @@
     ;; 検索を除外するディレクトリ名のパターン
     find-git-exclude-patterns-list
     '(
-      "~/\.\.*"
+      "/\\..*"
       "/rc/site-lisp\\."
       )
 

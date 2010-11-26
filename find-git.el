@@ -30,20 +30,15 @@
 
 ;;; basic options
 (defvar find-git-status-function 'magit-status)
-(defvar find-git-nested-tree-list ())
-(defvar find-git-exclude-pathes-list ())
+(defvar find-git-nested-tree-list      ())
+(defvar find-git-exclude-pathes-list   ())
 (defvar find-git-exclude-patterns-list ())
 
 (defvar find-git-include-patterns-list ())
-(defvar find-git-include-pathes-list ())
+(defvar find-git-include-pathes-list   ())
 
 ;;; internal variables
-(defconst find-git-buffers-alist ())
-
-
-
-
-
+(defconst find-git-buffers-alist       ())
 
 ;;; utilities
 (defun find-git--make-pattern (patterns-list
@@ -89,7 +84,7 @@
                    (file-readable-p full))
           (find-git--walk-dir full cb))))))
 
-(defun find-git--add-text-propeties-to-line (line props)
+(defun find-git--add-text-properties-to-line (line props)
   (let (buffer-read-only)
     (save-excursion
       (goto-line line)
@@ -146,27 +141,18 @@
         (set-face-attribute face nil prop val)))))
 
 (defun find-git-mode--repos-at-point (point)
-  (let ((ln (line-number-at-pos point)))
-    (when (> ln 1)
-      (let ((dir (save-excursion
-                   (goto-char point)
-                   (beginning-of-line)
-                   (buffer-substring-no-properties
-                    (point) (progn (end-of-line) (point))))))
-        (when (and (> (length dir) 0)
-                   (file-directory-p dir))
-          dir)))))
+  (get-text-property point 'find-git-repos))
 
 (defun find-git-mode--after-moved ()
   (when (and find-git-current-line
              (> find-git-current-line 1))
-    (find-git--add-text-propeties-to-line
+    (find-git--add-text-properties-to-line
      find-git-current-line
      '(face find-git-repos-face)))
   (setq find-git-current-line (line-number-at-pos (point)))
   (let ((repo (find-git-mode--repos-at-point (point))))
     (when repo
-      (find-git--add-text-propeties-to-line
+      (find-git--add-text-properties-to-line
        (line-number-at-pos (point)) '(face find-git-current-repos-face))
       (setq find-git-current-repos repo))))
   
@@ -229,27 +215,39 @@
 ;;; commands
 (defun find-git (base)
   (interactive (list (read-directory-name "base: ")))
-  (let ((xpat (find-git--exclude-pattern))
-        (ipat (find-git--include-pattern))
-        (npat (find-git--nested-tree-pattern))
-        (echo (if (interactive-p)
-                  (lambda (path)
-                    (insert (format "%s\n"  path))
-                    (previous-line)
-                    (find-git--add-text-propeties-to-line
-                     (line-number-at-pos (point))
-                     `(
-                       find-git-repos ,path
-                       face           find-git-repos-face
-                       ))
-                    (next-line)
-                    )
-                (lambda (x))))
-        (buf  (when (interactive-p)
-                (get-buffer-create
-                 (format "*find-git %s*"
-                         (expand-file-name base)))))
-        (R    ()))
+  (let*
+      ((trunc-base-pattern
+        (concat
+         "\\`"
+         (regexp-quote (expand-file-name base)))
+        )
+       (xpat (find-git--exclude-pattern))
+       (ipat (find-git--include-pattern))
+       (npat (find-git--nested-tree-pattern))
+       (echo (if (interactive-p)
+                 (lambda (path)
+                   (insert
+                    (format "./%s\n" 
+                            (replace-regexp-in-string
+                             trunc-base-pattern
+                             ""
+                             path)
+                            ))
+                   (previous-line)
+                   (find-git--add-text-properties-to-line
+                    (line-number-at-pos (point))
+                    `(
+                      find-git-repos ,path
+                                     face           find-git-repos-face
+                                     ))
+                   (next-line)
+                   )
+               (lambda (x))))
+       (buf  (when (interactive-p)
+               (get-buffer-create
+                (format "*find-git %s*"
+                        (expand-file-name base)))))
+       (R    ()))
 
     (when buf
       (pop-to-buffer buf)
@@ -258,7 +256,7 @@
       (delete-region (point-min) (point-max))
       (goto-char (point-min))
       (insert (format "git repositories under the %s.\n" base))
-      (find-git--add-text-propeties-to-line
+      (find-git--add-text-properties-to-line
        1 '(face find-git-title-face))
       (find-git-mode)
       (setq find-git-base-directory (expand-file-name base)))
