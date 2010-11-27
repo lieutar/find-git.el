@@ -126,10 +126,14 @@
             :underline   t)
            (find-git-repos-face
             :foreground  "#00F")
-           (find-git-repos-has-status-buffer-face
+           (find-git-repos+face
             :foreground  "#F00")
-           (find-git-current-repos-face
-            :background "#CFC")
+           (find-git-repos-face*
+            :background "#CFC"
+            :inherit    find-git-repos-face)
+           (find-git-repos+face*
+            :background "#CFC"
+            :inherit    find-git-repos+face)
            ))
   (let* ((face  (car spec))
          (props (cdr spec)))
@@ -146,15 +150,26 @@
 (defun find-git-mode--after-moved ()
   (when (and find-git-current-line
              (> find-git-current-line 1))
-    (find-git--add-text-properties-to-line
-     find-git-current-line
-     '(face find-git-repos-face)))
+    (let* ((pre-face (save-excursion
+                       (goto-line find-git-current-line)
+                       (get-text-property (point) 'face)))
+           (new-face (intern (replace-regexp-in-string
+                              "\\*\\'" "" (face-name pre-face)))))
+      (find-git--add-text-properties-to-line
+       find-git-current-line
+       `(face ,new-face))))
   (setq find-git-current-line (line-number-at-pos (point)))
   (let ((repo (find-git-mode--repos-at-point (point))))
     (when repo
-      (find-git--add-text-properties-to-line
-       (line-number-at-pos (point)) '(face find-git-current-repos-face))
-      (setq find-git-current-repos repo))))
+      (let* ((pre-face (get-text-property (point) 'face))
+             (new-face (intern (format "%s*" (face-name pre-face)))))
+        (find-git--add-text-properties-to-line
+         (line-number-at-pos (point)) `(face ,new-face))
+        (setq find-git-current-repos repo))
+      (let ((slot (assoc repo find-git-buffers-alist)))
+        (when slot (let ((win (selected-window)))
+                     (pop-to-buffer (cdr slot))
+                     (select-window win)))))))
   
 
 ;;; find-git-mode-commands
@@ -166,18 +181,21 @@
              (buf  (if (and slot
                             (buffer-live-p (cdr slot)))
                        (cdr slot)
-                     (progn
-                       (save-window-excursion
-                         (apply
-                          find-git-status-function
-                          (list (concat repo "/")))
-                         (let ((buf (current-buffer)))
-                           (setq find-git-buffers-alist
-                                 (cons
-                                  (cons repo buf)
+                     (let ((buf (save-window-excursion
+                                  (apply
+                                   find-git-status-function
+                                   (list (concat repo "/")))
+                                  (current-buffer))))
+                       
+                       (setq find-git-buffers-alist
+                             (cons
+                              (cons repo buf)
                               find-git-buffers-alist))
-                           buf)))))
-         (win (selected-window)))
+                       (find-git--add-text-properties-to-line
+                        (line-number-at-pos (point))
+                        '(face find-git-repos+face*))
+                       buf)))
+             (win (selected-window)))
         (pop-to-buffer buf)
         (select-window win)))))
 
@@ -211,23 +229,22 @@
      find-git-current-line
      find-git-current-repos)))
 
-
+(defconst find-git-scanning-log nil)
 ;;; commands
 (defun find-git (base)
   (interactive (list (read-directory-name "base: ")))
+  (setq find-git-scanning-log nil)
   (let*
-      ((trunc-base-pattern
-        (concat
-         "\\`"
-         (regexp-quote (expand-file-name base)))
-        )
+      ((base (expand-file-name
+              (replace-regexp-in-string "[/\\\\]\\'" "" base)))
+       (trunc-base-pattern (concat "\\`" (regexp-quote base)))
        (xpat (find-git--exclude-pattern))
        (ipat (find-git--include-pattern))
        (npat (find-git--nested-tree-pattern))
        (echo (if (interactive-p)
                  (lambda (path)
                    (insert
-                    (format "./%s\n" 
+                    (format ".%s\n" 
                             (replace-regexp-in-string
                              trunc-base-pattern
                              ""
@@ -237,16 +254,17 @@
                    (find-git--add-text-properties-to-line
                     (line-number-at-pos (point))
                     `(
-                      find-git-repos ,path
-                                     face           find-git-repos-face
-                                     ))
+                      find-git-repos
+                      ,path
+                      face
+                      ,(if (assoc path find-git-buffers-alist) 
+                           'find-git-repos+face
+                         `find-git-repos-face)))
                    (next-line)
                    )
                (lambda (x))))
        (buf  (when (interactive-p)
-               (get-buffer-create
-                (format "*find-git %s*"
-                        (expand-file-name base)))))
+               (get-buffer-create (format "*find-git %s*" base))))
        (R    ()))
 
     (when buf
@@ -259,26 +277,39 @@
       (find-git--add-text-properties-to-line
        1 '(face find-git-title-face))
       (find-git-mode)
-      (setq find-git-base-directory (expand-file-name base)))
+      (setq find-git-base-directory base))
 
     (find-git--walk-dir
-     (expand-file-name base)
+     base
      (lambda (path)
        (condition-case nil
            (message (replace-regexp-in-string "%" "%%" path))
          (error))
-       (cond ((and (string-match xpat path)
-                   (not (string-match ipat path))) :stop)
-             ((file-directory-p (expand-file-name (concat path "/.git")))
-              (apply echo (list path))
-              (setq R (cons path R))
-              (unless (string-match npat path) :stop)))))
+       (let ((xmatch (string-match xpat path))
+             (imatch (string-match ipat path))
+             (nmatch (string-match npat path))
+             (gitp   (file-directory-p (expand-file-name ".git" path))))
+
+         (add-to-list 'find-git-scanning-log
+                      (list :path   path
+                            :xmatch xmatch
+                            :imatch imatch
+                            :nmatch nmatch
+                            :gitp   gitp))
+
+         (cond ((and xmatch (not imatch)) :stop)
+               (gitp
+                (apply echo (list path))
+                (setq R (cons path R))
+                (add-to-list 'find-git-scanning-log (list :MATCH! path))
+                (unless nmatch :stop))))))
 
     (when buf
       (setq buffer-read-only t)
       (goto-char (point-min)))
 
     (reverse R)))
+
 
 
 (provide 'find-git)
