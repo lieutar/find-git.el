@@ -153,18 +153,22 @@
     (let* ((pre-face (save-excursion
                        (goto-line find-git-current-line)
                        (get-text-property (point) 'face)))
-           (new-face (intern (replace-regexp-in-string
-                              "\\*\\'" "" (face-name pre-face)))))
-      (find-git--add-text-properties-to-line
-       find-git-current-line
-       `(face ,new-face))))
+           (new-face (and pre-face
+                          (intern (replace-regexp-in-string
+                                   "\\*\\'" "" (face-name pre-face))))))
+      (when pre-face
+        (find-git--add-text-properties-to-line
+         find-git-current-line
+         `(face ,new-face)))))
   (setq find-git-current-line (line-number-at-pos (point)))
   (let ((repo (find-git-mode--repos-at-point (point))))
     (when repo
       (let* ((pre-face (get-text-property (point) 'face))
-             (new-face (intern (format "%s*" (face-name pre-face)))))
-        (find-git--add-text-properties-to-line
-         (line-number-at-pos (point)) `(face ,new-face))
+             (new-face (and pre-face
+                            (intern (format "%s*" (face-name pre-face))))))
+        (when pre-face
+          (find-git--add-text-properties-to-line
+           (line-number-at-pos (point)) `(face ,new-face)))
         (setq find-git-current-repos repo))
       (let ((slot (assoc repo find-git-buffers-alist)))
         (when slot (let ((win (selected-window)))
