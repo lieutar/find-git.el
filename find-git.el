@@ -36,6 +36,7 @@
 
 (defvar find-git-include-patterns-list ())
 (defvar find-git-include-pathes-list   ())
+(defvar find-git-popup-find-git-mode-buffer t)
 
 ;;; internal variables
 (defconst find-git-buffers-alist       ())
@@ -108,6 +109,7 @@
     (define-key km (kbd "j")      'find-git-mode-next-line)
     (define-key km (kbd "d")      'find-git-mode-dired)
     (define-key km (kbd "s")      'find-git-mode-git-status)
+    (define-key km (kbd "g")      'find-git-mode-reflesh)
     (define-key km (kbd "<RET>")  'find-git-mode-git-status)
     (define-key km (kbd "q")      'bury-buffer)
     km))
@@ -233,19 +235,27 @@
      find-git-current-line
      find-git-current-repos)))
 
+(defconst find-git-mode-reflesh nil)
+(defun find-git-mode-reflesh ()
+  (interactive)
+  (let ((find-git-mode-reflesh t)
+        (find-git-popup-find-git-mode-buffer))
+    (find-git find-git-base-directory)))
+
 (defconst find-git-scanning-log nil)
 ;;; commands
 (defun find-git (base)
   (interactive (list (read-directory-name "base: ")))
   (setq find-git-scanning-log nil)
   (let*
-      ((base (expand-file-name
+      ((refleshp (or (interactive-p) find-git-mode-reflesh))
+       (base (expand-file-name
               (replace-regexp-in-string "[/\\\\]\\'" "" base)))
        (trunc-base-pattern (concat "\\`" (regexp-quote base)))
        (xpat (find-git--exclude-pattern))
        (ipat (find-git--include-pattern))
        (npat (find-git--nested-tree-pattern))
-       (echo (if (interactive-p)
+       (echo (if refleshp
                  (lambda (path)
                    (insert
                     (format ".%s\n" 
@@ -267,12 +277,14 @@
                    (next-line)
                    )
                (lambda (x))))
-       (buf  (when (interactive-p)
+       (buf  (when refleshp
                (get-buffer-create (format "*find-git %s*" base))))
        (R    ()))
 
     (when buf
-      (pop-to-buffer buf)
+      (if find-git-popup-find-git-mode-buffer
+          (pop-to-buffer buf)
+        (switch-to-buffer buf))
       (set-buffer    buf)
       (setq buffer-read-only nil)
       (delete-region (point-min) (point-max))
