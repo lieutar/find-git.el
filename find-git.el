@@ -96,6 +96,10 @@
                            props))))
 
 
+
+;;(find-git-remote "~/.emacs.d/rc/")
+
+
 ;;;
 ;;; find-git-mode
 ;;;
@@ -111,6 +115,7 @@
     (define-key km (kbd "s")      'find-git-mode-git-status)
     (define-key km (kbd "g")      'find-git-mode-reflesh)
     (define-key km (kbd "<RET>")  'find-git-mode-git-status)
+    (define-key km (kbd "C-x C-s") 'find-git-mode-save)
     (define-key km (kbd "q")      'bury-buffer)
     km))
 
@@ -118,6 +123,7 @@
 (defvar find-git-base-directory nil)
 (defvar find-git-current-line   nil)
 (defvar find-git-current-repos  nil)
+(defvar find-git-current-repos-list nil)
 
 ;;; faces
 (dolist (spec
@@ -205,6 +211,17 @@
         (pop-to-buffer buf)
         (select-window win)))))
 
+(defun find-git-mode-save ()
+  (interactive)
+  (save-excursion
+    (let ((base  find-git-base-directory)
+          (repos find-git-current-repos-list))
+      (with-temp-buffer
+        (insert base "\n")
+        (insert "----\n")
+        (dolist (repo repos)
+          (insert repo "\n"))
+        (save-buffer)))))
 
 (defun find-git-mode-previous-line (&optional n)
   (interactive)
@@ -233,7 +250,9 @@
    'make-variable-buffer-local
    '(find-git-base-directory
      find-git-current-line
-     find-git-current-repos)))
+     find-git-current-repos
+     find-git-current-repos-list
+     )))
 
 (defconst find-git-mode-reflesh nil)
 (defun find-git-mode-reflesh ()
@@ -243,6 +262,8 @@
     (find-git find-git-base-directory)))
 
 (defconst find-git-scanning-log nil)
+
+
 ;;; commands
 (defun find-git (base)
   (interactive (list (read-directory-name "base: ")))
@@ -257,6 +278,7 @@
        (npat (find-git--nested-tree-pattern))
        (echo (if refleshp
                  (lambda (path)
+                   (add-to-list 'find-git-current-repos-list path)
                    (insert
                     (format ".%s\n" 
                             (replace-regexp-in-string
@@ -325,6 +347,25 @@
       (goto-char (point-min)))
 
     (reverse R)))
+
+
+
+(defun find-git-remote (repos)
+  (let* ((default-directory 
+           (expand-file-name (replace-regexp-in-string
+                              "\\([^/\\\\]\\)\\'" "\\1/"
+                              repos)))
+         (remote-src (shell-command-to-string "git remote show")))
+    (mapcar 
+     (lambda (remote)
+       (let ((info
+              (shell-command-to-string (concat "git remote show " remote))))
+         (when (string-match "Fetch URL: \\(.*\\)$" info)
+           (list remote (match-string 1 info)))))
+     (split-string  (replace-regexp-in-string
+                     "\n\\'" ""  remote-src)
+                    "\n"))))
+
 
 
 
