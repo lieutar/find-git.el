@@ -43,6 +43,7 @@
 ;;; internal variables
 (defconst find-git-buffers-alist       ())
 (defconst find-git-repos-alist         ())
+(defconst find-git-anythig-source      ())
 
 ;;; utilities
 (defun find-git--make-pattern (patterns-list
@@ -386,6 +387,9 @@
                           R))
            find-git-repos-alist))
 
+    (setq find-git-anythig-source 
+          (append R find-git-anythig-source))
+
     (reverse R)))
 
 
@@ -413,6 +417,13 @@
      (split-string  (replace-regexp-in-string
                      "\n\\'" ""  remote-src)
                     "\n"))))
+
+(defconst anything-c-source-find-git
+  '((name . "Git repositories")
+    (init . (lambda ()))
+    (candidates . find-git-anythig-source)
+    (type . file)))
+
 
 (provide 'find-git)
 ;;; find-git.el ends here
