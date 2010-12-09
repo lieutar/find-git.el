@@ -38,8 +38,10 @@
 (defvar find-git-include-pathes-list   ())
 (defvar find-git-popup-find-git-mode-buffer t)
 
+
 ;;; internal variables
 (defconst find-git-buffers-alist       ())
+(defconst find-git-repos-alist         ())
 
 ;;; utilities
 (defun find-git--make-pattern (patterns-list
@@ -97,8 +99,6 @@
 
 
 
-;;(find-git-remote "~/.emacs.d/rc/")
-
 
 ;;;
 ;;; find-git-mode
@@ -107,23 +107,23 @@
 
 (defconst find-git-mode-map
   (let ((km (make-sparse-keymap)))
-    (define-key km (kbd "<up>")   'find-git-mode-previous-line)
-    (define-key km (kbd "k")      'find-git-mode-previous-line)
-    (define-key km (kbd "<down>") 'find-git-mode-next-line)
-    (define-key km (kbd "j")      'find-git-mode-next-line)
-    (define-key km (kbd "d")      'find-git-mode-dired)
-    (define-key km (kbd "s")      'find-git-mode-git-status)
-    (define-key km (kbd "g")      'find-git-mode-reflesh)
-    (define-key km (kbd "<RET>")  'find-git-mode-git-status)
+    (define-key km (kbd "k")      'previous-line)
+    (define-key km (kbd "j")      'next-line)
+    (define-key km (kbd "d")       'find-git-mode-dired)
+    (define-key km (kbd "s")       'find-git-mode-git-status)
+    (define-key km (kbd "g")       'find-git-mode-refresh)
+    (define-key km (kbd "<RET>")   'find-git-mode-git-status)
     (define-key km (kbd "C-x C-s") 'find-git-mode-save)
     (define-key km (kbd "q")      'bury-buffer)
     km))
 
 ;;; buffer local variables
-(defvar find-git-base-directory nil)
-(defvar find-git-current-line   nil)
-(defvar find-git-current-repos  nil)
+(defvar find-git-base-directory     nil)
+(defvar find-git-current-line       nil)
+(defvar find-git-current-repos      nil)
 (defvar find-git-current-repos-list nil)
+(defvar find-git-previous-window-configuration nil)
+(defvar find-git-startup-window-configuration nil)
 
 ;;; faces
 (dolist (spec
@@ -169,19 +169,35 @@
          find-git-current-line
          `(face ,new-face)))))
   (setq find-git-current-line (line-number-at-pos (point)))
+
   (let ((repo (find-git-mode--repos-at-point (point))))
-    (when repo
-      (let* ((pre-face (get-text-property (point) 'face))
-             (new-face (and pre-face
-                            (intern (format "%s*" (face-name pre-face))))))
-        (when pre-face
-          (find-git--add-text-properties-to-line
-           (line-number-at-pos (point)) `(face ,new-face)))
-        (setq find-git-current-repos repo))
-      (let ((slot (assoc repo find-git-buffers-alist)))
-        (when slot (let ((win (selected-window)))
-                     (pop-to-buffer (cdr slot))
-                     (select-window win)))))))
+    (if repo
+        (progn
+          (let* ((pre-face (get-text-property (point) 'face))
+                 (new-face (and pre-face
+                                (intern (format "%s*" (face-name pre-face))))))
+            (when pre-face
+              (find-git--add-text-properties-to-line
+               (line-number-at-pos (point)) `(face ,new-face)))
+            (setq find-git-current-repos repo))
+          (let ((slot (assoc repo find-git-buffers-alist)))
+            (if slot
+                (let ((win (selected-window)))
+                  (unless find-git-previous-window-configuration
+                    (setq find-git-previous-window-configuration
+                          (current-window-configuration (selected-frame))))
+                  (pop-to-buffer (cdr slot))
+                  (select-window win))
+              (when find-git-previous-window-configuration
+                (set-window-configuration
+                 find-git-previous-window-configuration)
+                (setq find-git-previous-window-configuration nil)))))
+       (when find-git-previous-window-configuration
+                (set-window-configuration
+                 find-git-previous-window-configuration)
+                (setq find-git-previous-window-configuration nil)))))
+
+
   
 
 ;;; find-git-mode-commands
@@ -189,14 +205,20 @@
   (interactive)
   (let ((repo (find-git-mode--repos-at-point (point))))
     (when repo
-      (let* ((slot (assoc repo find-git-buffers-alist))
-             (buf  (if (and slot
-                            (buffer-live-p (cdr slot)))
-                       (cdr slot)
+      (let*
+          ((slot (assoc repo find-git-buffers-alist))
+           (buf  (if (and slot (buffer-live-p (cdr slot))) (cdr slot)
+                   (progn
+
+                     (unless find-git-previous-window-configuration
+                       (setq find-git-previous-window-configuration
+                             (current-window-configuration (selected-frame))))
+
                      (let ((buf (save-window-excursion
                                   (apply
                                    find-git-status-function
-                                   (list (concat repo "/")))
+                                   (list (replace-regexp-in-string
+                                          "\\([^/]\\)\\'" "\\1/" repo)))
                                   (current-buffer))))
                        
                        (setq find-git-buffers-alist
@@ -206,7 +228,7 @@
                        (find-git--add-text-properties-to-line
                         (line-number-at-pos (point))
                         '(face find-git-repos+face*))
-                       buf)))
+                       buf))))
              (win (selected-window)))
         (pop-to-buffer buf)
         (select-window win)))))
@@ -223,15 +245,6 @@
           (insert repo "\n"))
         (save-buffer)))))
 
-(defun find-git-mode-previous-line (&optional n)
-  (interactive)
-  (previous-line n)
-  (find-git-mode--after-moved))
-
-(defun find-git-mode-next-line (&optional n)
-  (interactive)
-  (next-line n)
-  (find-git-mode--after-moved))
 
 (defun find-git-mode-dired ()
   (interactive)
@@ -247,36 +260,45 @@
 
 (define-derived-mode find-git-mode text-mode "find-git"
   (mapcar
-   'make-variable-buffer-local
+   'make-local-variable
    '(find-git-base-directory
      find-git-current-line
      find-git-current-repos
      find-git-current-repos-list
-     )))
+     find-git-previous-window-configuration
+     find-git-startup-window-configuration
+     post-command-hook
+     ))
+  (add-hook 'post-command-hook 'find-git-mode--after-moved))
 
-(defconst find-git-mode-reflesh nil)
-(defun find-git-mode-reflesh ()
+(defconst find-git-mode-refresh nil)            
+(defun find-git-mode-refresh ()
   (interactive)
-  (let ((find-git-mode-reflesh t)
-        (find-git-popup-find-git-mode-buffer))
+  (let ((find-git-mode-refresh t)
+        (find-git-popup-find-git-mode-buffer))                            
     (find-git find-git-base-directory)))
 
 (defconst find-git-scanning-log nil)
 
 
+
+
 ;;; commands
-(defun find-git (base)
+(defun find-git (base &rest opts)
   (interactive (list (read-directory-name "base: ")))
   (setq find-git-scanning-log nil)
   (let*
-      ((refleshp (or (interactive-p) find-git-mode-reflesh))
+      ((popup-to-current-window (plist-get opts :popup-to-current-window))
+       (refreshp (or (interactive-p)
+                     find-git-mode-refresh
+                     popup-to-current-window))
        (base (expand-file-name
               (replace-regexp-in-string "[/\\\\]\\'" "" base)))
        (trunc-base-pattern (concat "\\`" (regexp-quote base)))
        (xpat (find-git--exclude-pattern))
        (ipat (find-git--include-pattern))
        (npat (find-git--nested-tree-pattern))
-       (echo (if refleshp
+       (echo (if refreshp
                  (lambda (path)
                    (add-to-list 'find-git-current-repos-list path)
                    (insert
@@ -299,22 +321,25 @@
                    (next-line)
                    )
                (lambda (x))))
-       (buf  (when refleshp
+       (buf  (when refreshp
                (get-buffer-create (format "*find-git %s*" base))))
        (R    ()))
 
     (when buf
-      (if find-git-popup-find-git-mode-buffer
+      (set-buffer buf)
+      (find-git-mode)
+      (setq find-git-startup-window-configuration
+            (current-window-configuration (selected-frame)))
+      (if (and find-git-popup-find-git-mode-buffer
+               (not popup-to-current-window))
           (pop-to-buffer buf)
         (switch-to-buffer buf))
-      (set-buffer    buf)
       (setq buffer-read-only nil)
       (delete-region (point-min) (point-max))
       (goto-char (point-min))
       (insert (format "git repositories under the %s.\n" base))
       (find-git--add-text-properties-to-line
        1 '(face find-git-title-face))
-      (find-git-mode)
       (setq find-git-base-directory base))
 
     (find-git--walk-dir
@@ -346,9 +371,29 @@
       (setq buffer-read-only t)
       (goto-char (point-min)))
 
+    (setq find-git-repos-alist
+          (append
+           (apply 'append
+                  (mapcar (lambda (repo)
+                            (list (cons repo repo)
+                                  (cons (file-name-nondirectory
+                                         (replace-regexp-in-string
+                                          "/\\'" "" repo))
+                                        repo)))
+                          R))
+           find-git-repos-alist))
+
     (reverse R)))
 
 
+(defun find-git-find-repos (repos)
+  (interactive
+   (list
+    (cdr (assoc (car (completing-read-multiple
+                      "repo? "
+                      find-git-repos-alist))
+                find-git-repos-alist))))
+    (dired repos))
 
 (defun find-git-remote (repos)
   (let* ((default-directory 
@@ -365,9 +410,6 @@
      (split-string  (replace-regexp-in-string
                      "\n\\'" ""  remote-src)
                     "\n"))))
-
-
-
 
 (provide 'find-git)
 ;;; find-git.el ends here
