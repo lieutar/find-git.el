@@ -29,7 +29,8 @@
 
 
 ;;; basic options
-(defvar find-git-status-function 'magit-status)
+(defvar find-git-auto-status-mode      nil)
+(defvar find-git-status-function       'magit-status)
 (defvar find-git-nested-tree-list      ())
 (defvar find-git-exclude-pathes-list   ())
 (defvar find-git-exclude-patterns-list ())
@@ -155,6 +156,17 @@
 (defun find-git-mode--repos-at-point (point)
   (get-text-property point 'find-git-repos))
 
+(defun find-git-mode--escape-current-window-configuration ()
+  (unless find-git-previous-window-configuration
+    (setq find-git-previous-window-configuration
+          (current-window-configuration (selected-frame)))))
+
+(defun find-git-mode--restore-previous-window-configuration ()
+  (when find-git-previous-window-configuration
+    (set-window-configuration
+     find-git-previous-window-configuration)
+    (setq find-git-previous-window-configuration nil)))
+
 (defun find-git-mode--after-moved ()
   (when (and find-git-current-line
              (> find-git-current-line 1))
@@ -181,55 +193,46 @@
                (line-number-at-pos (point)) `(face ,new-face)))
             (setq find-git-current-repos repo))
           (let ((slot (assoc repo find-git-buffers-alist)))
-            (if slot
-                (let ((win (selected-window)))
-                  (unless find-git-previous-window-configuration
-                    (setq find-git-previous-window-configuration
-                          (current-window-configuration (selected-frame))))
-                  (pop-to-buffer (cdr slot))
-                  (select-window win))
-              (when find-git-previous-window-configuration
-                (set-window-configuration
-                 find-git-previous-window-configuration)
-                (setq find-git-previous-window-configuration nil)))))
-       (when find-git-previous-window-configuration
-                (set-window-configuration
-                 find-git-previous-window-configuration)
-                (setq find-git-previous-window-configuration nil)))))
-
-
+            (cond
+             (slot
+              (let ((win (selected-window)))
+                (find-git-mode--escape-current-window-configuration)
+                (pop-to-buffer (cdr slot))
+                (select-window win)))
+             (find-git-auto-status-mode
+              (let ((win (selected-window)))
+                (pop-to-buffer
+                 (find-git-mode-git-status--internal repo))
+                (select-window win)))
+             (t
+              (find-git-mode--restore-previous-window-configuration)))))
+      (find-git-mode--restore-previous-window-configuration))))
   
 
 ;;; find-git-mode-commands
+(defun find-git-mode-git-status--internal (repo)
+  (find-git-mode--escape-current-window-configuration)
+  (let ((buf (save-window-excursion
+               (funcall find-git-status-function
+                        (replace-regexp-in-string
+                         "\\([^/]\\)\\'" "\\1/" repo))
+               (current-buffer))))
+    (setq find-git-buffers-alist (cons `(,repo . ,buf) find-git-buffers-alist))
+    (find-git--add-text-properties-to-line
+     (line-number-at-pos (point))
+     '(face find-git-repos+face*))
+    buf))
+
 (defun find-git-mode-git-status ()
   (interactive)
   (let ((repo (find-git-mode--repos-at-point (point))))
     (when repo
       (let*
           ((slot (assoc repo find-git-buffers-alist))
-           (buf  (if (and slot (buffer-live-p (cdr slot))) (cdr slot)
-                   (progn
-
-                     (unless find-git-previous-window-configuration
-                       (setq find-git-previous-window-configuration
-                             (current-window-configuration (selected-frame))))
-
-                     (let ((buf (save-window-excursion
-                                  (apply
-                                   find-git-status-function
-                                   (list (replace-regexp-in-string
-                                          "\\([^/]\\)\\'" "\\1/" repo)))
-                                  (current-buffer))))
-                       
-                       (setq find-git-buffers-alist
-                             (cons
-                              (cons repo buf)
-                              find-git-buffers-alist))
-                       (find-git--add-text-properties-to-line
-                        (line-number-at-pos (point))
-                        '(face find-git-repos+face*))
-                       buf))))
-             (win (selected-window)))
+           (buf  (if (and slot (buffer-live-p (cdr slot)))
+                     (cdr slot)
+                   (find-git-mode-git-status--internal repo)))
+           (win (selected-window)))
         (pop-to-buffer buf)
         (select-window win)))))
 
