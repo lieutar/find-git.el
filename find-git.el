@@ -30,6 +30,7 @@
 
 ;;; basic options
 (defvar find-git-auto-status-mode      nil)
+(defvar find-git-cache-file            "~/.emacs.d/find-git.cache")
 (defvar find-git-status-function       'magit-status)
 (defvar find-git-nested-tree-list      ())
 (defvar find-git-exclude-pathes-list   ())
@@ -41,11 +42,23 @@
 
 
 ;;; internal variables
+(defconst find-git-cache               ())
 (defconst find-git-buffers-alist       ())
 (defconst find-git-repos-alist         ())
 (defconst find-git-anythig-source      ())
 
 ;;; utilities
+(defun find-git--put-alist (key value sym)
+  (let* ((alist (symbol-value sym))
+         (slot  (assoc key alist)))
+    (set sym
+         (if slot
+             (progn
+               (setcdr slot value)
+               alist)
+           (cons (cons key value) alist)))))
+
+
 (defun find-git--make-pattern (patterns-list
                                pathes-list)
   (mapconcat
@@ -65,20 +78,16 @@
                find-git-include-pathes-list)
            (find-git--make-pattern find-git-include-patterns-list
                                    find-git-include-pathes-list))
-      "\\`\0\\'")
-  )
-
+      "\\`\0\\'"))
 
 (defun find-git--exclude-pattern ()
   (find-git--make-pattern (append (list "/\\.git\\'")
                                   find-git-exclude-patterns-list)
-                          find-git-exclude-pathes-list)
-  )
+                          find-git-exclude-pathes-list))
 
 (defun find-git--nested-tree-pattern ()
   (find-git--make-pattern ()
-                          find-git-nested-tree-list)
-  )
+                          find-git-nested-tree-list))
 
 (defun find-git--walk-dir (base cb)
   (unless (eq :stop (apply cb (list base)))
@@ -94,12 +103,32 @@
     (save-excursion
       (goto-line line)
       (beginning-of-line)
-      (add-text-properties (point) (progn (condition-case nil
-                                              (next-line)
-                                            (error (end-of-line)))  (point))
-                           props))))
+      (add-text-properties
+       (point) (progn (condition-case nil
+                          (next-line)
+                        (error (end-of-line)))  (point))
+       props))))
 
+(defun find-git-load-cache ()
+  (interactive)
+  (when (file-readable-p find-git-cache-file)
+    (save-excursion 
+      (let ((buf (find-file-noselect find-git-cache-file)))
+        (set-buffer buf)
+        (setq find-git-cache
+              (read (buffer-substring-no-properties (point-min)
+                                                    (point-max))))
+        (kill-buffer buf)))))
 
+(defun find-git-save-cache ()
+  (interactive)
+  (when (file-writable-p find-git-cache-file)
+    (with-temp-buffer
+      (insert (format "%S" find-git-cache))
+      (setq buffer-file-name find-git-cache-file)
+      (save-buffer))))
+
+(find-git-load-cache)
 
 
 ;;;
@@ -117,6 +146,7 @@
     (define-key km (kbd "<RET>")   'find-git-mode-git-status)
     (define-key km (kbd "C-x C-s") 'find-git-mode-save)
     (define-key km (kbd "q")      'bury-buffer)
+    (define-key km (kbd "C-c a")  'find-git-auto-status-mode)
     km))
 
 ;;; buffer local variables
@@ -418,11 +448,17 @@
                      "\n\\'" ""  remote-src)
                     "\n"))))
 
+(define-minor-mode find-git-auto-status-mode
+  ""
+  nil
+  nil)
+
 (defconst anything-c-source-find-git
   '((name . "Git repositories")
     (init . (lambda ()))
     (candidates . find-git-anythig-source)
     (type . file)))
+
 
 
 (provide 'find-git)
