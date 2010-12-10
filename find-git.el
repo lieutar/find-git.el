@@ -423,43 +423,42 @@
     (reverse R)))
 
 
-(defun find-git-find-repos (repos)
-  (interactive
-   (list
-    (cdr (assoc (car (completing-read-multiple
-                      "repo? "
-                      find-git-repos-alist))
-                find-git-repos-alist))))
-    (dired repos))
-
-(defun find-git-remote (repos)
-  (let* ((default-directory 
-           (expand-file-name (replace-regexp-in-string
-                              "\\([^/\\\\]\\)\\'" "\\1/"
-                              repos)))
-         (remote-src (shell-command-to-string "git remote show")))
-    (mapcar 
-     (lambda (remote)
-       (let ((info
-              (shell-command-to-string (concat "git remote show " remote))))
-         (when (string-match "Fetch URL: \\(.*\\)$" info)
-           (list remote (match-string 1 info)))))
-     (split-string  (replace-regexp-in-string
-                     "\n\\'" ""  remote-src)
-                    "\n"))))
 
 (define-minor-mode find-git-auto-status-mode
   ""
   nil
   nil)
 
+(defun find-git--read-repos ()
+  (cdr (assoc (car (completing-read-multiple "repo? "
+                                             find-git-repos-alist))
+              find-git-repos-alist)))
+
+(defun find-git-find-repos (repos)
+  (interactive (list (find-git--read-repos)))
+    (dired repos))
+
+(defun find-git-git-status (repos)
+  (interactive (list (find-git--read-repos)))
+  (switch-to-buffer
+   (let ((slot (assoc repos find-git-buffers-alist)))
+     (if slot (cdr slot)
+       (find-git-mode-git-status--internal repos)))))
+
 (defconst anything-c-source-find-git
   '((name . "Git repositories")
     (init . (lambda ()))
     (candidates . find-git-anythig-source)
-    (type . file)))
+    (type . find-git-repos)))
 
+(defconst find-git-repos-type-attribute
+  '(find-git-repos
+    (action
+     . (("Visit to the directory" . dired)
+        ("Git Status"      . find-git-git-status)))))
 
+(add-to-list 'anything-type-attributes
+             find-git-repos-type-attribute)
 
 (provide 'find-git)
 ;;; find-git.el ends here
