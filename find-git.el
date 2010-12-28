@@ -30,6 +30,7 @@
 
 ;;; basic options
 (defvar find-git-auto-status-mode      nil)
+
 (defvar find-git-cache-file            "~/.emacs.d/find-git.cache")
 (defvar find-git-status-function       'magit-status)
 (defvar find-git-nested-tree-list      ())
@@ -38,14 +39,56 @@
 
 (defvar find-git-include-patterns-list ())
 (defvar find-git-include-pathes-list   ())
-(defvar find-git-popup-find-git-mode-buffer t)
+
 
 
 ;;; internal variables
-(defconst find-git-cache               ())
-(defconst find-git-buffers-alist       ())
-(defconst find-git-repos-alist         ())
-(defconst find-git-anythig-source      ())
+(defconst find-git-cache                 ())
+(defconst find-git-summary-buffers-alist ())
+(defconst find-git-buffers-alist         ())
+(defconst find-git-repos-alist           ())
+(defconst find-git-anything-source       ())
+
+(defsubst find-git-regularize (base)
+  (expand-file-name
+   (replace-regexp-in-string "[/\\\\]\\'" "" base)))
+
+(defun find-git-load-cache ()
+  (interactive)
+  (when (file-exists-p find-git-cache-file)
+    (let ((buf (find-file-noselect find-git-cache-file)))
+      (save-excursion
+        (set-buffer buf)
+        (setq find-git-cache (read (buffer-substring-no-properties
+                                    (point-min)(point-max))))
+        (kill-buffer buf)
+        t))))
+(find-git-load-cache)
+
+(defun find-git-save-cache ()
+  (interactive)
+  (when (file-writable-p find-git-cache-file)
+    (let ((buf (find-file-noselect find-git-cache-file)))
+      (save-excursion
+        (set-buffer buf)
+        (delete-region (point-min) (point-max))
+        (insert (format "%S" find-git-cache))
+        (kill-buffer buf)
+        t))))
+
+(defun find-git-get-cache (base)
+  (let ((slot (assoc base find-git-cache)))
+    (and slot (cdr slot))))
+
+(defun find-git-put-cache (base repos-list)
+  (setcdr (or (assoc base find-git-cache)
+              (let ((slot (cons base nil)))
+                (add-to-list 'find-git-cache slot)
+                slot))
+          repos-list)
+  (find-git-save-cache))
+
+
 
 ;;; utilities
 (defun find-git--put-alist (key value sym)
@@ -305,34 +348,45 @@
      ))
   (add-hook 'post-command-hook 'find-git-mode--after-moved))
 
-(defconst find-git-mode-refresh nil)            
+
 (defun find-git-mode-refresh ()
   (interactive)
-  (let ((find-git-mode-refresh t)
-        (find-git-popup-find-git-mode-buffer))                            
-    (find-git find-git-base-directory)))
+  (find-git find-git-base-directory :refresh t))
+
+(defun find-git-refresh ()
+  (interactive)
+  (let ((find-git-opts '(:refresh t)))
+    (call-interactively 'find-git)))
 
 (defconst find-git-scanning-log nil)
 
 
-
+(defconst find-git-opts nil)
 
 ;;; commands
+
 (defun find-git (base &rest opts)
-  (interactive (list (read-directory-name "base: ")))
+  ""
+  (interactive (cons (read-directory-name "find-git base: " "~/")
+                     find-git-opts))
   (setq find-git-scanning-log nil)
   (let*
-      ((popup-to-current-window (plist-get opts :popup-to-current-window))
-       (refreshp (or (interactive-p)
-                     find-git-mode-refresh
-                     popup-to-current-window))
-       (base (expand-file-name
-              (replace-regexp-in-string "[/\\\\]\\'" "" base)))
+      ((popup (if (member :popup opts)
+                  (plist-get opts :popup)
+                (if (plist-get opts :popup-to-current-window)
+                    'current-window
+                  t)))
+       (refreshp (plist-get opts :refresh))
+       (make-buffer-p
+        (or (or (eq popup t)
+                (eq popup 'current-window)
+                (eq popup 'hidden))))
+       (base (find-git-regularize base))
        (trunc-base-pattern (concat "\\`" (regexp-quote base)))
        (xpat (find-git--exclude-pattern))
        (ipat (find-git--include-pattern))
        (npat (find-git--nested-tree-pattern))
-       (echo (if refreshp
+       (echo (if make-buffer-p
                  (lambda (path)
                    (add-to-list 'find-git-current-repos-list path)
                    (insert
@@ -352,22 +406,29 @@
                       ,(if (assoc path find-git-buffers-alist) 
                            'find-git-repos+face
                          `find-git-repos-face)))
-                   (next-line)
-                   )
+                   (next-line))
                (lambda (x))))
-       (buf  (when refreshp
+       (buf  (when make-buffer-p
                (get-buffer-create (format "*find-git %s*" base))))
-       (R    ()))
+       (R    (if refreshp () (find-git-get-cache base))))
 
     (when buf
       (set-buffer buf)
+      (setcdr (or (assoc (expand-file-name base)
+                         find-git-summary-buffers-alist)
+                  (let ((slot (cons base nil)))
+                    (add-to-list 'find-git-summary-buffers-alist slot)
+                    slot))
+              buf)
       (find-git-mode)
       (setq find-git-startup-window-configuration
             (current-window-configuration (selected-frame)))
-      (if (and find-git-popup-find-git-mode-buffer
-               (not popup-to-current-window))
-          (pop-to-buffer buf)
-        (switch-to-buffer buf))
+
+      (case popup
+        ((       t      ) (pop-to-buffer    buf))
+        ((current-window) (switch-to-buffer buf))
+        (t                nil))
+
       (setq buffer-read-only nil)
       (delete-region (point-min) (point-max))
       (goto-char (point-min))
@@ -376,52 +437,55 @@
        1 '(face find-git-title-face))
       (setq find-git-base-directory base))
 
-    (find-git--walk-dir
-     base
-     (lambda (path)
-       (condition-case nil
-           (message (replace-regexp-in-string "%" "%%" path))
-         (error))
-       (let ((xmatch (string-match xpat path))
-             (imatch (string-match ipat path))
-             (nmatch (string-match npat path))
-             (gitp   (file-directory-p (expand-file-name ".git" path))))
+    (if R
+        (dolist (repo R)
+          (apply echo (list repo)))
 
-         (add-to-list 'find-git-scanning-log
-                      (list :path   path
-                            :xmatch xmatch
-                            :imatch imatch
-                            :nmatch nmatch
-                            :gitp   gitp))
-
-         (cond ((and xmatch (not imatch)) :stop)
-               (gitp
-                (apply echo (list path))
-                (setq R (cons path R))
-                (add-to-list 'find-git-scanning-log (list :MATCH! path))
-                (unless nmatch :stop))))))
+      (progn (find-git--walk-dir
+              base
+              (lambda (path)
+                (condition-case nil
+                    (message (replace-regexp-in-string "%" "%%" path))
+                  (error))
+                (let ((xmatch (string-match xpat path))
+                      (imatch (string-match ipat path))
+                      (nmatch (string-match npat path))
+                      (gitp   (file-directory-p
+                               (expand-file-name ".git" path))))
+                  (add-to-list 'find-git-scanning-log
+                               (list :path   path
+                                     :xmatch xmatch
+                                     :imatch imatch
+                                     :nmatch nmatch
+                                     :gitp   gitp))
+                  
+                  (cond ((and xmatch (not imatch)) :stop)
+                        (gitp
+                         (apply echo (list path))
+                         (setq R (cons (find-git-regularize path) R))
+                         (add-to-list 'find-git-scanning-log
+                                      (list :MATCH! path))
+                         (unless nmatch :stop))))))
+             (setq R (reverse R))
+             (find-git-put-cache base R)))
 
     (when buf
       (setq buffer-read-only t)
       (goto-char (point-min)))
 
-    (setq find-git-repos-alist
-          (append
-           (apply 'append
-                  (mapcar (lambda (repo)
-                            (list (cons repo repo)
-                                  (cons (file-name-nondirectory
-                                         (replace-regexp-in-string
-                                          "/\\'" "" repo))
-                                        repo)))
-                          R))
-           find-git-repos-alist))
+    (dolist (repo (reverse R))
+      (unless (assoc repo find-git-repos-alist)
+        (setq find-git-repos-alist (cons (cons repo repo)
+                                         (cons (cons (file-name-nondirectory
+                                                      (replace-regexp-in-string
+                                                       "/\\'" "" repo))
+                                                     repo)
+                                               find-git-repos-alist))))
+      (unless (member repo find-git-anything-source)
+        (setq find-git-anything-source 
+              (cons repo find-git-anything-source))))
 
-    (setq find-git-anythig-source 
-          (append R find-git-anythig-source))
-
-    (reverse R)))
-
+    R))
 
 
 (define-minor-mode find-git-auto-status-mode
@@ -445,20 +509,45 @@
      (if slot (cdr slot)
        (find-git-mode-git-status--internal repos)))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; anything sources
+;;
+
 (defconst anything-c-source-find-git
-  '((name . "Git repositories")
-    (init . (lambda ()))
-    (candidates . find-git-anythig-source)
-    (type . find-git-repos)))
+  '((name       . "Git repositories")
+    (candidates . find-git-anything-source)
+    (action . (("Visit to the directory" . dired)
+               ("Git Status"             . find-git-git-status)))))
 
-(defconst find-git-repos-type-attribute
-  '(find-git-repos
-    (action
-     . (("Visit to the directory" . dired)
-        ("Git Status"      . find-git-git-status)))))
+(defconst anything-c-source-find-git-bases
+  '((name       . "Cached find-git summaries")
+    (candidates . (lambda ()
+                    (mapcar 'car find-git-cache)))
+    (action . (("Visit Summary" . (lambda (base)
+                                    (find-git base :popup 'current-buffer)))
+               ("Refresh" . (lambda (base)
+                              (find-git base :refresh t :popup nil)))
+               ("Refresh and visit" .
+                (lambda (base) (find-git base
+                                         :refresh t
+                                         :popup 'current-buffer)))))))
 
-(add-to-list 'anything-type-attributes
-             find-git-repos-type-attribute)
+(defconst anything-c-source-find-git-commands
+  '((name       . "find-git commands")
+    (candidates . (find-git))
+    (type . command)))
+
+(defvar find-git-anything-c-sources
+  '(anything-c-source-find-git
+    anything-c-source-find-git-bases
+    anything-c-source-find-git-commands))
+
+(defun find-git-anything ()
+  (interactive)
+  (anything :sources find-git-anything-c-sources))
+
+
 
 (provide 'find-git)
 ;;; find-git.el ends here
