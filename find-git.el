@@ -449,16 +449,9 @@
   '((name . "Git repositories")
     (init . (lambda ()))
     (candidates . find-git-anythig-source)
-    (type . find-git-repos)))
-
-(defconst find-git-repos-type-attribute
-  '(find-git-repos
     (action
      . (("Visit to the directory" . dired)
         ("Git Status"      . find-git-git-status)))))
-
-(add-to-list 'anything-type-attributes
-             find-git-repos-type-attribute)
 
 (provide 'find-git)
 ;;; find-git.el ends here
