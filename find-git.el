@@ -548,6 +548,5 @@
   (anything :sources find-git-anything-c-sources))
 
 
-
 (provide 'find-git)
 ;;; find-git.el ends here
